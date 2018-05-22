@@ -1,0 +1,23 @@
+#compdef trello
+
+_trello() {
+    local curcontext="$curcontext" state line help="-h --help"
+    integer ret=1
+    typeset -A opt_args
+    _arguments \
+        '(- *)'{-h,--help}'[show help]' \
+        '*: :->modes'
+
+    case $words[$(( $CURRENT - 1 ))] in
+        trello )
+            _values mode \
+                'auth[make authorizaion]' \
+                'board[GET boards]' \
+                'list[GET lists of a board]' \
+                'card[GET cards of a list]'
+            ;;
+    esac
+
+}
+
+_trello "$@"
