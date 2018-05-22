@@ -1,0 +1,220 @@
+#!/bin/bash
+
+CONFIG_PATH=$HOME/.trello.conf
+APP_NAME=takaosan
+API_KEY=bbace0141a897e15c644344540eb233b
+API_TOKEN=
+
+#---
+
+browser-open() {
+    if which open >/dev/null; then
+        open "$1"
+    else
+        firefox "$1"
+    fi
+}
+
+trim() {
+    sed 's/^ *//g; s/  *$//g'
+}
+
+save-config() {
+    cat <<EOM > $CONFIG_PATH
+API_KEY=${API_KEY}
+API_TOKEN=${API_TOKEN}
+EOM
+
+echo "SAVED TO $CONFIG_PATH ---"
+cat $CONFIG_PATH
+echo "---"
+}
+
+restore-config() {
+    if [ -f $CONFIG_PATH ]; then
+        source $CONFIG_PATH
+    fi
+}
+
+restore-config
+
+#---
+
+usage() {
+    cat <<EOM
+trello auth
+    authorizes
+
+trello board -u <username>
+    gets board names of <username>
+
+trello list -u <username> -B <board-name>
+    gets list names of the board
+
+trello card -u <username> -B <board-name> -L <list-name>
+    gets cards of the list of the board
+
+trello help
+    prints this
+EOM
+}
+
+auth() {
+    URL="https://trello.com/1/authorize?key=${API_KEY}&name=${APP_NAME}&expiration=never&response_type=token&scope=read,write"
+    browser-open "$URL"
+    echo -n "token> "
+    read API_TOKEN
+    API_TOKEN=$(echo "$API_TOKEN" | trim)
+    save-config
+}
+
+get-board() {
+
+    USERNAME=
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -u )
+                USERNAME="$2"
+                shift 2
+                ;;
+            * )
+                shift
+                ;;
+        esac
+    done
+    if [ -z "$USERNAME" ]; then
+        echo "Wrong args" >&2
+        usage
+        exit 1
+    fi
+
+    curl -s "https://trello.com/1/members/${USERNAME}/boards?key=${API_KEY}&token=${API_TOKEN}&fields=all"
+}
+
+get-board-id() {
+    USERNAME="$1"
+    BOARD_NAME="$2"
+    BOARD_ID=$(
+        get-board -u "${USERNAME}" |
+        jq -r ".[] | if .name == \"$BOARD_NAME\" then .id else empty end" |
+        head -1
+    )
+    if [ -z "$BOARD_ID" ]; then
+        echo "Not Found Board:${BOARD_NAME}" >&2
+        exit 1
+    fi
+    echo "$BOARD_ID"
+}
+
+get-list-id() {
+    USERNAME="$1"
+    BOARD_NAME="$2"
+    LIST_NAME="$3"
+    LIST_ID=$(
+        get-list -u "$USERNAME" -B "$BOARD_NAME" |
+        jq -r ".[] | if .name == \"$LIST_NAME\" then .id else empty end" |
+        head -1
+    )
+    if [ $? -ne 0 -o -z "$LIST_ID" ]; then
+        echo "Not Found List:${LIST_NAME}" >&2
+        exit 1
+    fi
+    echo "$LIST_ID"
+}
+
+get-list() {
+
+    USERNAME=
+    BOARD_NAME=
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -u )
+                USERNAME="$2"
+                shift 2
+                ;;
+            -b | -B )
+                BOARD_NAME="$2"
+                shift 2
+                ;;
+            * )
+                shift
+                ;;
+        esac
+    done
+    if [ -z "$USERNAME" -o -z "$BOARD_NAME" ]; then
+        echo "Wrong args" >&2
+        usage
+        exit 1
+    fi
+
+    BOARD_ID=$(get-board-id "$USERNAME" "$BOARD_NAME")
+    [ $? -ne 0 ] && exit $?
+
+    curl -s "https://trello.com/1/boards/${BOARD_ID}/lists?key=${API_KEY}&token=${API_TOKEN}&fields=all"
+}
+
+get-card() {
+
+    USERNAME=
+    BOARD_NAME=
+    LIST_NAME=
+
+    while [ $# -gt 0 ]; do
+        case "$1" in
+            -u )
+                USERNAME="$2"
+                shift 2
+                ;;
+            -b | -B )
+                BOARD_NAME="$2"
+                shift 2
+                ;;
+            -l | -L )
+                LIST_NAME="$2"
+                shift 2
+                ;;
+            * )
+                shift
+                ;;
+        esac
+    done
+    if [ -z "$USERNAME" -o -z "$BOARD_NAME" -o -z "$LIST_NAME" ]; then
+        echo "Wrong args" >&2
+        usage
+        exit 1
+    fi
+
+    LIST_ID=$(get-list-id "$USERNAME" "$BOARD_NAME" "$LIST_NAME")
+    [ $? -ne 0 ] && exit $?
+
+    curl -s "https://trello.com/1/lists/${LIST_ID}/cards?key=${API_KEY}&token=${API_TOKEN}&fields=all"
+}
+
+#---
+
+case "$1" in
+    auth )
+        auth
+        ;;
+    board | boards )
+        shift
+        get-board "$@"
+        ;;
+    list | lists )
+        shift
+        get-list "$@"
+        ;;
+    card | cards )
+        shift
+        get-card "$@"
+        ;;
+    help )
+        usage
+        ;;
+    * )
+        echo "Unknown command"
+        usage
+        ;;
+esac
